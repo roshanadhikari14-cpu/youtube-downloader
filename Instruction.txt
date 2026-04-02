@@ -1,0 +1,113 @@
+Build a full-stack YouTube Video Downloader web application based on the following spec:
+
+---
+
+## OVERVIEW
+Create a web app that lets users paste a YouTube URL, fetch available resolutions, 
+and download the video as an MP4 file. This is a conversion of a working 
+Google Colab Python script into a production web app.
+
+---
+
+## TECH STACK
+- Frontend: HTML + CSS + Vanilla JavaScript (single page)
+- Backend: Python with FastAPI
+- YouTube tool: yt-dlp
+- Video processing: ffmpeg
+- No database needed
+
+---
+
+## BACKEND (FastAPI - main.py)
+
+Create these two API endpoints:
+
+### 1. POST /fetch-resolutions
+- Input: { "url": "https://youtube.com/..." }
+- Runs: yt-dlp -J <url> to get video metadata as JSON
+- Parses all formats, filters by standard resolutions: [144, 240, 360, 480, 720, 1080, 1440, 2160]
+- For each available resolution, calculate estimated file size 
+  (video size + best audio size)
+- Returns: { "title": "...", "resolutions": [{"label": "720p — 45.2 MB", "value": 720}, ...] }
+- Handle errors: invalid URL, private/restricted video
+
+### 2. POST /download
+- Input: { "url": "...", "resolution": 720 }
+- Runs yt-dlp with format selector: "bv*[height<=720]+ba/b"
+- merge-output-format mp4
+- Streams progress updates back to frontend using 
+  StreamingResponse with text/event-stream (SSE)
+- Each SSE event: data: {"percent": 45, "status": "downloading"}
+- When done: data: {"percent": 100, "status": "done", "filename": "video.mp4"}
+- Saves file temporarily in a /downloads folder
+- After SSE stream ends, the file should be available at GET /file/<filename>
+
+### 3. GET /file/{filename}
+- Serves the downloaded MP4 file as a file download response
+- Use FileResponse with media_type video/mp4
+- Delete the file after serving (cleanup)
+
+### Additional backend requirements:
+- Add CORS middleware (allow all origins for dev)
+- Use asyncio/subprocess for non-blocking yt-dlp execution
+- Handle ffmpeg merge automatically (yt-dlp does this natively)
+- Requirements.txt should include: fastapi, uvicorn, yt-dlp, python-multipart
+
+---
+
+## FRONTEND (index.html - single file with embedded CSS + JS)
+
+### UI Layout:
+- Centered card design, max-width 600px
+- Dark theme preferred (#1a1a2e background, #16213e card)
+- App title: "YouTube Downloader"
+- Input field: full-width text input for YouTube URL
+- "Fetch Resolutions" button (blue)
+- Dropdown: hidden until resolutions are fetched, shows options like "720p — 45.2 MB"
+- "Download Video" button (green), disabled until resolution selected
+- Progress bar: animated, shows 0–100%
+- Status label: shows current step ("Fetching...", "Downloading...", "Done!")
+- Error messages in red below the status
+
+### JavaScript Logic:
+1. On "Fetch Resolutions" click:
+   - POST to /fetch-resolutions with the URL
+   - Populate dropdown with returned resolutions
+   - Show dropdown and enable Download button
+
+2. On "Download Video" click:
+   - POST to /download with URL + selected resolution
+   - Listen to SSE stream (EventSource or fetch with ReadableStream)
+   - Update progress bar and label in real time from SSE events
+   - When status === "done": auto-trigger file download via 
+     window.location.href = "/file/" + filename
+
+3. Error handling:
+   - Show friendly error messages for network failures, invalid URLs, etc.
+   - Reset UI state on error
+
+---
+
+## FOLDER STRUCTURE
+youtube-downloader/
+├── main.py           # FastAPI backend
+├── requirements.txt  # Python dependencies
+├── downloads/        # Temp folder for downloaded videos (auto-created)
+└── static/
+    └── index.html    # Frontend
+
+---
+
+## RUNNING INSTRUCTIONS (add to README.md)
+pip install -r requirements.txt
+uvicorn main:app --reload
+Then open http://localhost:8000/static/index.html
+
+---
+
+## IMPORTANT NOTES
+- yt-dlp and ffmpeg must be installed on the system
+- ffmpeg install: sudo apt install ffmpeg (Linux) or brew install ffmpeg (Mac)
+- yt-dlp install: pip install yt-dlp
+- The /downloads folder should be created automatically if it doesn't exist
+- For Windows compatibility, use pathlib.Path instead of hardcoded slash paths
