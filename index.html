@@ -1,0 +1,316 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>YouTube Downloader</title>
+    <style>
+      :root {
+        --bg: #1a1a2e;
+        --card: #16213e;
+        --text: #e6e6e6;
+        --muted: #b7b7c2;
+        --blue: #2f80ed;
+        --green: #27ae60;
+        --red: #eb5757;
+        --border: rgba(255, 255, 255, 0.08);
+      }
+
+      * {
+        box-sizing: border-box;
+        font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial,
+          "Apple Color Emoji", "Segoe UI Emoji";
+      }
+
+      body {
+        margin: 0;
+        background: radial-gradient(1200px 600px at 20% 10%, #23235a 0%, var(--bg) 60%);
+        color: var(--text);
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        padding: 24px;
+      }
+
+      .card {
+        width: 100%;
+        max-width: 600px;
+        background: linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(0, 0, 0, 0.05)),
+          var(--card);
+        border: 1px solid var(--border);
+        border-radius: 16px;
+        padding: 20px;
+        box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
+      }
+
+      h1 {
+        font-size: 22px;
+        margin: 0 0 14px 0;
+        letter-spacing: 0.2px;
+      }
+
+      .row {
+        display: grid;
+        gap: 12px;
+        margin-top: 12px;
+      }
+
+      input,
+      select {
+        width: 100%;
+        padding: 12px 12px;
+        border-radius: 10px;
+        border: 1px solid var(--border);
+        background: rgba(0, 0, 0, 0.2);
+        color: var(--text);
+        outline: none;
+      }
+
+      input::placeholder {
+        color: rgba(230, 230, 230, 0.55);
+      }
+
+      .btns {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 12px;
+      }
+
+      button {
+        width: 100%;
+        padding: 12px 12px;
+        border-radius: 10px;
+        border: none;
+        color: white;
+        font-weight: 600;
+        cursor: pointer;
+        transition: transform 0.05s ease, opacity 0.15s ease;
+      }
+
+      button:active {
+        transform: translateY(1px);
+      }
+
+      button:disabled {
+        opacity: 0.55;
+        cursor: not-allowed;
+      }
+
+      .btn-blue {
+        background: var(--blue);
+      }
+
+      .btn-green {
+        background: var(--green);
+      }
+
+      .progress {
+        width: 100%;
+        height: 12px;
+        border-radius: 999px;
+        border: 1px solid var(--border);
+        overflow: hidden;
+        background: rgba(0, 0, 0, 0.2);
+      }
+
+      .bar {
+        height: 100%;
+        width: 0%;
+        background: linear-gradient(90deg, #56ccf2, #2f80ed);
+        transition: width 0.25s ease;
+      }
+
+      .status {
+        margin-top: 10px;
+        color: var(--muted);
+        min-height: 20px;
+      }
+
+      .error {
+        margin-top: 8px;
+        color: var(--red);
+        min-height: 18px;
+      }
+
+      .meta {
+        margin-top: 6px;
+        font-size: 12px;
+        color: rgba(230, 230, 230, 0.5);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <h1>YouTube Downloader</h1>
+
+      <div class="row">
+        <input id="url" type="text" placeholder="Paste YouTube video URL here" />
+
+        <div class="btns">
+          <button id="fetch" class="btn-blue">Fetch Resolutions</button>
+          <button id="download" class="btn-green" disabled>Download Video</button>
+        </div>
+
+        <select id="resolutions" style="display: none"></select>
+
+        <div class="progress" aria-label="progress">
+          <div id="bar" class="bar"></div>
+        </div>
+
+        <div id="status" class="status"></div>
+        <div id="error" class="error"></div>
+        <div class="meta">Backend: <span id="backend">same origin</span></div>
+      </div>
+    </div>
+
+    <script>
+      const elUrl = document.getElementById("url");
+      const elFetch = document.getElementById("fetch");
+      const elDownload = document.getElementById("download");
+      const elRes = document.getElementById("resolutions");
+      const elBar = document.getElementById("bar");
+      const elStatus = document.getElementById("status");
+      const elError = document.getElementById("error");
+
+      function setProgress(pct) {
+        const p = Math.max(0, Math.min(100, Number(pct) || 0));
+        elBar.style.width = p + "%";
+      }
+
+      function setStatus(msg) {
+        elStatus.textContent = msg || "";
+      }
+
+      function setError(msg) {
+        elError.textContent = msg || "";
+      }
+
+      function resetUI() {
+        setProgress(0);
+        setStatus("");
+        setError("");
+        elRes.style.display = "none";
+        elRes.innerHTML = "";
+        elDownload.disabled = true;
+      }
+
+      async function postJson(path, body) {
+        const res = await fetch(path, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        if (!res.ok) {
+          let detail = "Request failed.";
+          try {
+            const j = await res.json();
+            detail = j.detail || detail;
+          } catch (e) {}
+          throw new Error(detail);
+        }
+        return res;
+      }
+
+      elFetch.addEventListener("click", async () => {
+        resetUI();
+        const url = elUrl.value.trim();
+        if (!url) {
+          setError("Please paste a YouTube URL.");
+          return;
+        }
+
+        try {
+          setStatus("Fetching...");
+          elFetch.disabled = true;
+
+          const res = await postJson("/fetch-resolutions", { url });
+          const data = await res.json();
+
+          const opts = data.resolutions || [];
+          if (!opts.length) throw new Error("No resolutions found.");
+
+          elRes.style.display = "block";
+          for (const o of opts) {
+            const option = document.createElement("option");
+            option.value = String(o.value);
+            option.textContent = o.label;
+            elRes.appendChild(option);
+          }
+
+          elDownload.disabled = false;
+          setStatus("Select a resolution and click Download.");
+        } catch (err) {
+          setStatus("");
+          setError(err.message || String(err));
+          elDownload.disabled = true;
+        } finally {
+          elFetch.disabled = false;
+        }
+      });
+
+      elDownload.addEventListener("click", async () => {
+        setError("");
+        const url = elUrl.value.trim();
+        const resolution = Number(elRes.value);
+        if (!url) return setError("Please paste a YouTube URL.");
+        if (!resolution) return setError("Please select a resolution.");
+
+        elDownload.disabled = true;
+        elFetch.disabled = true;
+        setProgress(0);
+        setStatus("Downloading...");
+
+        try {
+          const res = await postJson("/download", { url, resolution });
+          const reader = res.body.getReader();
+          const decoder = new TextDecoder();
+          let buf = "";
+
+          while (true) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            buf += decoder.decode(value, { stream: true });
+
+            // Parse SSE frames separated by blank line.
+            const parts = buf.split("\n\n");
+            buf = parts.pop() || "";
+
+            for (const part of parts) {
+              const line = part
+                .split("\n")
+                .map((s) => s.trim())
+                .find((s) => s.startsWith("data:"));
+              if (!line) continue;
+              const jsonStr = line.replace(/^data:\s*/, "");
+              let evt;
+              try {
+                evt = JSON.parse(jsonStr);
+              } catch (e) {
+                continue;
+              }
+
+              if (evt.percent != null) setProgress(evt.percent);
+              if (evt.status === "downloading") setStatus("Downloading... " + evt.percent + "%");
+              if (evt.status === "error") {
+                throw new Error(evt.message || "Download failed.");
+              }
+              if (evt.status === "done") {
+                setStatus("Done!");
+                setProgress(100);
+                const filename = evt.filename;
+                // Trigger browser download.
+                window.location.href = "/file/" + encodeURIComponent(filename);
+              }
+            }
+          }
+        } catch (err) {
+          setStatus("");
+          setError(err.message || String(err));
+        } finally {
+          elFetch.disabled = false;
+          elDownload.disabled = false;
+        }
+      });
+    </script>
+  </body>
+</html>
